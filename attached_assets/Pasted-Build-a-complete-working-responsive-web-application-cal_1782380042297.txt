@@ -1,0 +1,396 @@
+Build a complete, working, responsive web application called **Clothing Stock Manager** for my clothing brand.
+
+This is a private admin inventory dashboard. It is not an online store, and customers will not use it. Its only purpose is to let me add clothing articles, upload their pictures, enter prices, select fabric types, manage quantities by size, and view my complete stock.
+
+## 1. General requirements
+
+* Create a clean, modern and professional inventory dashboard.
+* Make it responsive for desktop, tablet and mobile.
+* Use a simple neutral design with a white or light-grey background, dark text and minimal accent colours.
+* Do not use a generic-looking template.
+* Add a sidebar on desktop and a mobile navigation menu.
+* Use a real persistent database. Do not use temporary mock data or browser-only local storage.
+* Use persistent file or object storage for article images.
+* Add secure single-admin authentication with login and logout.
+* Use the simplest reliable technology stack supported by Replit.
+* Set the default currency to PKR, but include a setting that lets me change the currency later.
+
+## 2. Main navigation
+
+Create these pages:
+
+1. Dashboard
+2. Add Article
+3. All Stock
+4. Low Stock
+5. Settings
+
+## 3. Add Article form
+
+Create an “Add New Article” page containing the following fields:
+
+### Article picture
+
+* Allow me to upload one main article picture.
+* Show an image preview before saving.
+* Allow JPG, JPEG, PNG and WebP files.
+* Validate the file type and file size.
+* Store the uploaded image permanently.
+* Let me replace or remove the picture while editing the article.
+
+### Article information
+
+Add these fields:
+
+* Article Name — required text input
+* Article Code or SKU — optional, but automatically generate one when left empty
+* Cost Price — required positive number
+* Sale Price — required positive number
+* Fabric Type — required dropdown selector
+* Optional Notes — multiline text field
+
+The sale price should not normally be lower than the cost price. Display a warning when it is, but still allow the admin to save it.
+
+### Fabric selector
+
+The fabric must be selected from a dropdown. Do not require me to type it manually.
+
+Include these options:
+
+* Cotton
+* Polyester
+* Cotton Blend
+* Linen
+* Denim
+* Leather
+* Wool
+* Silk
+* Rayon or Viscose
+* Nylon
+* Fleece
+* Spandex or Elastane
+* Jersey
+* Velvet
+* Chinese or Imported Fabric
+* Other
+
+When “Other” is selected, show a small field for entering the custom fabric name.
+
+## 4. Size and quantity selection
+
+Display these five available sizes:
+
+* Small
+* Medium
+* Large
+* XL
+* 2XL
+
+Each size must have:
+
+* An availability checkbox or switch
+* A quantity input
+
+When a size is selected, enable its quantity input.
+
+When a size is not selected, disable the quantity input and store its quantity as zero.
+
+Example:
+
+* Small: 3 pieces
+* Medium: 5 pieces
+* Large: 2 pieces
+* XL: 0 pieces
+* 2XL: 4 pieces
+
+Only allow whole numbers of zero or greater.
+
+Require at least one size to be selected before the article can be saved.
+
+Show a live calculation of:
+
+* Total pieces in stock
+* Total stock cost
+* Potential sales revenue
+* Potential gross profit
+* Profit per piece
+* Profit margin percentage
+
+Calculations:
+
+* Total pieces = sum of all size quantities
+* Total stock cost = total pieces × cost price
+* Potential revenue = total pieces × sale price
+* Potential gross profit = potential revenue − total stock cost
+* Profit per piece = sale price − cost price
+* Profit margin percentage = profit per piece ÷ sale price × 100
+
+Add a large **Done / Save Article** button.
+
+When I click Done:
+
+* Validate all required information.
+* Save the article and all size quantities in the database.
+* Show a success notification.
+* Redirect me to the article’s details page or All Stock page.
+* Do not lose the data after refreshing or reopening the application.
+
+## 5. Dashboard
+
+At the top of the dashboard, show summary cards for:
+
+* Total Articles
+* Total Pieces in Stock
+* Total Inventory Cost
+* Potential Sales Revenue
+* Potential Gross Profit
+* Low-Stock Articles
+* Out-of-Stock Articles
+
+Below the summary cards, show:
+
+### Stock by size
+
+Show the combined number of available pieces for:
+
+* Small
+* Medium
+* Large
+* XL
+* 2XL
+
+### Recent articles
+
+Show recently added or updated clothing articles.
+
+### Low-stock section
+
+Show articles with low quantities.
+
+Set the default low-stock limit to 3 pieces, but allow me to change it in Settings.
+
+## 6. All Stock page
+
+Display all saved articles as professional product cards.
+
+Each card must show:
+
+* Article picture
+* Article name
+* SKU
+* Fabric
+* Cost price
+* Sale price
+* Profit per piece
+* Available sizes
+* Quantity for every size
+* Total pieces
+* Stock status
+* Date created
+* Date last updated
+
+Use these stock statuses:
+
+* In Stock
+* Low Stock
+* Out of Stock
+
+Add these actions to every card:
+
+* View Details
+* Edit
+* Adjust Stock
+* Delete
+
+Ask for confirmation before deleting an article.
+
+Deleting an article should also safely remove its uploaded image when that image is no longer being used.
+
+## 7. Stock adjustment
+
+Create an “Adjust Stock” modal or page.
+
+Allow me to:
+
+* Select a size
+* Add pieces
+* Remove pieces
+* Replace the existing quantity with a new quantity
+* Enter an optional reason, such as New Stock, Damaged, Sold, Returned or Correction
+
+Never allow a quantity to become negative.
+
+Save every adjustment in a stock history table containing:
+
+* Article
+* Size
+* Adjustment type
+* Previous quantity
+* Quantity changed
+* New quantity
+* Reason
+* Date and time
+
+Show the stock history on the article details page.
+
+## 8. Search, filters and sorting
+
+On the All Stock page, include:
+
+* Search by article name or SKU
+* Filter by fabric
+* Filter by size
+* Filter by stock status
+* Sort by newest
+* Sort by oldest
+* Sort alphabetically
+* Sort by lowest stock
+* Sort by highest stock
+* Sort by cost price
+* Sort by sale price
+
+Add a Clear Filters button.
+
+## 9. Low Stock page
+
+Show articles that have:
+
+* A total quantity equal to or below the low-stock limit
+* Any individual selected size equal to or below the low-stock limit
+* Zero total stock
+
+Clearly identify which sizes are low or out of stock.
+
+Allow stock to be adjusted directly from this page.
+
+## 10. Article details and editing
+
+Create a complete article details page showing:
+
+* Large article image
+* Article information
+* Pricing and profit information
+* Quantities by size
+* Total quantity
+* Stock value
+* Potential revenue
+* Stock status
+* Stock-adjustment history
+* Created and updated dates
+
+The Edit button must allow me to change:
+
+* Picture
+* Name
+* SKU
+* Cost price
+* Sale price
+* Fabric
+* Notes
+* Available sizes
+* Quantities
+
+Prevent duplicate SKUs.
+
+## 11. Database structure
+
+Create proper database tables or models for:
+
+### Users
+
+* ID
+* Name
+* Email
+* Password hash or secure authentication ID
+* Created date
+
+### Articles
+
+* ID
+* Article name
+* SKU
+* Image URL
+* Cost price
+* Sale price
+* Fabric type
+* Custom fabric name
+* Notes
+* Low-stock threshold override, if used
+* Created date
+* Updated date
+
+### Article Size Stock
+
+* ID
+* Article ID
+* Size
+* Is available
+* Quantity
+* Updated date
+
+### Stock Adjustments
+
+* ID
+* Article ID
+* Size
+* Adjustment type
+* Previous quantity
+* Quantity changed
+* New quantity
+* Reason
+* Created date
+* User ID
+
+### Application Settings
+
+* Currency
+* Default low-stock threshold
+* Brand name
+* Updated date
+
+Use proper relationships, database constraints, validations and indexes.
+
+## 12. User experience
+
+* Show loading states while data or images are saving.
+* Disable the save button during submission to prevent duplicate records.
+* Show clear success and error notifications.
+* Use friendly empty states when no products exist.
+* Add an “Add Your First Article” button to the empty dashboard.
+* Format prices consistently.
+* Format dates clearly.
+* Make buttons and form fields easy to use on mobile.
+* Add accessible labels and keyboard-friendly controls.
+* Preserve unsaved form information when a temporary error occurs.
+
+## 13. Security and reliability
+
+* Protect all dashboard pages behind authentication.
+* Validate all data on both the client and server.
+* Securely handle image uploads.
+* Do not expose database credentials or secrets in frontend code.
+* Prevent SQL injection and unauthorized database access.
+* Add reliable error handling.
+* Create database migrations.
+* Do not use fake buttons or unfinished placeholder functionality.
+
+## 14. Testing
+
+After building the application:
+
+* Test adding a new article.
+* Test uploading and replacing an image.
+* Test saving quantities for all five sizes.
+* Test editing an article.
+* Test increasing and decreasing stock.
+* Test preventing negative stock.
+* Test deleting an article.
+* Test dashboard calculations.
+* Test search, filters and sorting.
+* Test low-stock detection.
+* Test database persistence after refreshing.
+* Test the application on mobile and desktop.
+
+Fix any errors found during testing.
+
+Start by creating the database structure and complete working functionality. Then build the polished user interface. Do not only create a visual prototype—the forms, database, authentication, calculations, uploads, editing, deleting, searching and stock adjustments must all work.

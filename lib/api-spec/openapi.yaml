@@ -1,22 +1,32 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Clothing Stock Manager API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: Auth
+    description: Browser and mobile authentication endpoints.
+  - name: Storage
+    description: Object storage upload and serving endpoints.
+  - name: articles
+    description: Clothing article management
+  - name: stock
+    description: Stock adjustment operations
+  - name: settings
+    description: Application settings
+  - name: dashboard
+    description: Dashboard summary data
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,7 +34,536 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+  /login:
+    get:
+      tags: [Auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the OIDC authorization endpoint.
+  /callback:
+    get:
+      tags: [Auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: iss
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        '302':
+          description: Redirect after login.
+  /logout:
+    get:
+      tags: [Auth]
+      operationId: logoutBrowserSession
+      summary: Clear the session and begin OIDC logout
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '302':
+          description: Redirect to the OIDC provider logout URL.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MobileTokenExchangeRequest'
+      responses:
+        '200':
+          description: Session created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileTokenExchangeSuccess'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Token did not contain usable claims.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Token exchange failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /mobile-auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+      responses:
+        '200':
+          description: Logout processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccess'
+
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to generate upload URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /storage/public-objects/{filePath}:
+    get:
+      tags: [Storage]
+      operationId: getPublicObject
+      summary: Serve a public asset
+      parameters:
+        - name: filePath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object content streamed.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: File not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /storage/objects/{objectPath}:
+    get:
+      tags: [Storage]
+      operationId: getStorageObject
+      summary: Serve an object entity
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object content streamed.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Object not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /articles:
+    get:
+      operationId: listArticles
+      tags: [articles]
+      summary: List all articles with optional filters and sorting
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search by name or SKU
+        - name: fabric
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by fabric type
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by available size
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [in_stock, low_stock, out_of_stock]
+          description: Filter by stock status
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [newest, oldest, alphabetical, lowest_stock, highest_stock, cost_price_asc, cost_price_desc, sale_price_asc, sale_price_desc]
+          description: Sort order
+      responses:
+        "200":
+          description: List of articles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    post:
+      operationId: createArticle
+      tags: [articles]
+      summary: Create a new article
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArticleInput"
+      responses:
+        "201":
+          description: Article created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Duplicate SKU
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /articles/{id}:
+    get:
+      operationId: getArticle
+      tags: [articles]
+      summary: Get a single article with full details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Article with sizes and adjustments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArticleDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updateArticle
+      tags: [articles]
+      summary: Update an article
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArticleUpdate"
+      responses:
+        "200":
+          description: Updated article
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Duplicate SKU
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteArticle
+      tags: [articles]
+      summary: Delete an article
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteSuccess"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /articles/{id}/adjustments:
+    post:
+      operationId: adjustStock
+      tags: [stock]
+      summary: Adjust stock for a specific article size
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockAdjustmentInput"
+      responses:
+        "201":
+          description: Adjustment saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockAdjustment"
+        "400":
+          description: Validation error (e.g. would result in negative stock)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Article not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /articles/{id}/adjustments/list:
+    get:
+      operationId: listAdjustments
+      tags: [stock]
+      summary: List all stock adjustments for an article
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of adjustments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StockAdjustment"
+
+  /articles/low-stock:
+    get:
+      operationId: listLowStockArticles
+      tags: [articles]
+      summary: List articles that are low stock or out of stock
+      responses:
+        "200":
+          description: Low stock articles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get dashboard summary statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/recent-articles:
+    get:
+      operationId: getRecentArticles
+      tags: [dashboard]
+      summary: Get recently added or updated articles
+      responses:
+        "200":
+          description: Recent articles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+
+  /dashboard/stock-by-size:
+    get:
+      operationId: getStockBySize
+      tags: [dashboard]
+      summary: Get total stock count per size
+      responses:
+        "200":
+          description: Stock by size
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockBySize"
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get application settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update application settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppSettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+
 components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +573,337 @@ components:
       required:
         - status
 
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id:
+          type: string
+        email:
+          type: ["string", "null"]
+          format: email
+        firstName:
+          type: ["string", "null"]
+        lastName:
+          type: ["string", "null"]
+        profileImageUrl:
+          type: ["string", "null"]
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        code_verifier:
+          type: string
+          minLength: 1
+        redirect_uri:
+          type: string
+          minLength: 1
+          format: uri
+        state:
+          type: string
+          minLength: 1
+        nonce:
+          type: string
+          minLength: 1
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        size:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          minLength: 1
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+        objectPath:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/UploadUrlRequest'
+
+    ArticleSizeStock:
+      type: object
+      required: [id, articleId, size, isAvailable, quantity, updatedAt]
+      properties:
+        id:
+          type: integer
+        articleId:
+          type: integer
+        size:
+          type: string
+          enum: [S, M, L, XL, XXL]
+        isAvailable:
+          type: boolean
+        quantity:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type: string
+          format: date-time
+
+    Article:
+      type: object
+      required: [id, name, sku, imageUrl, costPrice, salePrice, fabricType, customFabricName, notes, createdAt, updatedAt, sizes, totalQuantity, stockStatus]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        sku:
+          type: string
+        imageUrl:
+          type: ["string", "null"]
+        costPrice:
+          type: number
+        salePrice:
+          type: number
+        fabricType:
+          type: string
+        customFabricName:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        sizes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArticleSizeStock"
+        totalQuantity:
+          type: integer
+        stockStatus:
+          type: string
+          enum: [in_stock, low_stock, out_of_stock]
+
+    ArticleDetail:
+      allOf:
+        - $ref: "#/components/schemas/Article"
+        - type: object
+          required: [adjustments]
+          properties:
+            adjustments:
+              type: array
+              items:
+                $ref: "#/components/schemas/StockAdjustment"
+
+    ArticleSizeInput:
+      type: object
+      required: [size, isAvailable, quantity]
+      properties:
+        size:
+          type: string
+          enum: [S, M, L, XL, XXL]
+        isAvailable:
+          type: boolean
+        quantity:
+          type: integer
+          minimum: 0
+
+    ArticleInput:
+      type: object
+      required: [name, costPrice, salePrice, fabricType, sizes]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        sku:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        costPrice:
+          type: number
+          minimum: 0
+        salePrice:
+          type: number
+          minimum: 0
+        fabricType:
+          type: string
+        customFabricName:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        sizes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArticleSizeInput"
+          minItems: 1
+
+    ArticleUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        sku:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        costPrice:
+          type: number
+          minimum: 0
+        salePrice:
+          type: number
+          minimum: 0
+        fabricType:
+          type: string
+        customFabricName:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        sizes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArticleSizeInput"
+
+    StockAdjustment:
+      type: object
+      required: [id, articleId, size, adjustmentType, previousQuantity, quantityChanged, newQuantity, reason, createdAt]
+      properties:
+        id:
+          type: integer
+        articleId:
+          type: integer
+        size:
+          type: string
+          enum: [S, M, L, XL, XXL]
+        adjustmentType:
+          type: string
+          enum: [add, remove, replace]
+        previousQuantity:
+          type: integer
+        quantityChanged:
+          type: integer
+        newQuantity:
+          type: integer
+        reason:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    StockAdjustmentInput:
+      type: object
+      required: [size, adjustmentType, quantity]
+      properties:
+        size:
+          type: string
+          enum: [S, M, L, XL, XXL]
+        adjustmentType:
+          type: string
+          enum: [add, remove, replace]
+        quantity:
+          type: integer
+          minimum: 0
+        reason:
+          type: ["string", "null"]
+
+    DashboardStats:
+      type: object
+      required: [totalArticles, totalPieces, totalInventoryCost, potentialRevenue, potentialGrossProfit, lowStockArticles, outOfStockArticles]
+      properties:
+        totalArticles:
+          type: integer
+        totalPieces:
+          type: integer
+        totalInventoryCost:
+          type: number
+        potentialRevenue:
+          type: number
+        potentialGrossProfit:
+          type: number
+        lowStockArticles:
+          type: integer
+        outOfStockArticles:
+          type: integer
+
+    StockBySize:
+      type: object
+      required: [S, M, L, XL, XXL]
+      properties:
+        S:
+          type: integer
+        M:
+          type: integer
+        L:
+          type: integer
+        XL:
+          type: integer
+        XXL:
+          type: integer
+
+    AppSettings:
+      type: object
+      required: [currency, lowStockThreshold, brandName, updatedAt]
+      properties:
+        currency:
+          type: string
+        lowStockThreshold:
+          type: integer
+          minimum: 1
+        brandName:
+          type: string
+        updatedAt:
+          type: ["string", "null"]
+          format: date-time
+
+    AppSettingsUpdate:
+      type: object
+      properties:
+        currency:
+          type: string
+        lowStockThreshold:
+          type: integer
+          minimum: 1
+        brandName:
+          type: string
+
+    DeleteSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean

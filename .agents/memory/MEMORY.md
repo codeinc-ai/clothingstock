@@ -1,0 +1,3 @@
+- [Zod v3 in esbuild bundles](zod-esbuild.md) — use `"zod"` not `"zod/v4"` in server code; esbuild cannot resolve the /v4 subpath (catalog is v3).
+- [Composite libs and import.meta.env](composite-lib-vite.md) — composite libs (emitDeclarationOnly) must NOT use import.meta.env; they lack vite/client types. Hard-code or parameterize instead.
+- [pnpm overrides for React peers](react-peer-overrides.md) — use literal version like "19.1.0" not "$react" in pnpm.overrides; workspace root has no direct react dep so $react fails to resolve.
