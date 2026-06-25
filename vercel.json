@@ -3,11 +3,6 @@
   "framework": null,
   "buildCommand": "pnpm run vercel-build",
   "outputDirectory": "artifacts/clothing-stock/dist/public",
-  "functions": {
-    "api/[...path].ts": {
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
