@@ -40,10 +40,9 @@ configured in the Vercel project settings.
 | `ADMIN_EMAIL` | no | Email shown for the admin user |
 | `B2_KEY_ID` | yes | Backblaze application key id |
 | `B2_APP_KEY` | yes | Backblaze application key |
-| `B2_BUCKET` | yes | Backblaze bucket name (must be **public**) |
+| `B2_BUCKET` | yes | Backblaze bucket name (can be **private**) |
 | `B2_REGION` | yes | e.g. `us-west-004` |
 | `B2_ENDPOINT` | yes | e.g. `https://s3.us-west-004.backblazeb2.com` |
-| `B2_PUBLIC_BASE_URL` | no | Override the public file base URL |
 
 ## Deploying to Vercel
 
@@ -55,11 +54,14 @@ configured in the Vercel project settings.
 
 ### Backblaze B2 setup
 
-- Create a **public** bucket.
+- Create a bucket (it can be **private**). Uploaded images are read back through
+  the API using short-lived presigned GET URLs, so the bucket never needs to be
+  public.
 - Create an application key scoped to that bucket; use the key id/secret for
   `B2_KEY_ID` / `B2_APP_KEY`.
-- Add a CORS rule on the bucket allowing `PUT` (and `GET`) from your Vercel
-  domain so browser uploads succeed.
+- Add a CORS rule on the bucket allowing `PUT` from your Vercel domain so browser
+  uploads succeed (image display goes through the API, so no `GET` CORS rule is
+  required).
 
 ### MongoDB Atlas setup
 
@@ -86,5 +88,6 @@ variables above before starting the API server.
 
 - Article ids are sequential integers backed by a `counters` collection in
   MongoDB, preserving the original numeric API contract.
-- Uploaded images are stored in Backblaze and referenced by their full public
-  URL; the API returns that URL as the article `imageUrl`.
+- Uploaded images live in a private Backblaze bucket. The article `imageUrl` is
+  a stable app path (`/api/storage/objects/<key>`); requesting it redirects to a
+  short-lived presigned GET URL, keeping the bucket private.

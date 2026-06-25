@@ -1,4 +1,8 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 
@@ -30,26 +34,16 @@ function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "file";
 }
 
-function buildPublicUrl(bucket: string, key: string): string {
-  const base = process.env.B2_PUBLIC_BASE_URL;
-  if (base) {
-    return `${base.replace(/\/+$/, "")}/${key}`;
-  }
-  const endpoint = getEnv("B2_ENDPOINT").replace(/\/+$/, "");
-  return `${endpoint}/${bucket}/${key}`;
-}
-
 export interface UploadTarget {
   /** Presigned PUT URL the client uploads the file to. */
   uploadURL: string;
-  /** Public URL where the uploaded file is served from (stored as imageUrl). */
-  publicUrl: string;
+  /** Stable object key stored with the article (e.g. uploads/<uuid>-name.jpg). */
   key: string;
 }
 
 /**
- * Generate a presigned PUT URL for a new object plus the public URL it will be
- * served from. The bucket must be public for the returned URL to be readable.
+ * Generate a presigned PUT URL for a new object plus the stable object key.
+ * Works with a PRIVATE bucket — reads are served later via presigned GET URLs.
  */
 export async function createUploadTarget(name: string): Promise<UploadTarget> {
   const bucket = getEnv("B2_BUCKET");
@@ -60,9 +54,17 @@ export async function createUploadTarget(name: string): Promise<UploadTarget> {
   const command = new PutObjectCommand({ Bucket: bucket, Key: key });
   const uploadURL = await getSignedUrl(getClient(), command, { expiresIn: 900 });
 
-  return {
-    uploadURL,
-    publicUrl: buildPublicUrl(bucket, key),
-    key,
-  };
+  return { uploadURL, key };
+}
+
+/**
+ * Generate a short-lived presigned GET URL to read a private object.
+ */
+export async function createDownloadUrl(
+  key: string,
+  expiresIn = 900,
+): Promise<string> {
+  const bucket = getEnv("B2_BUCKET");
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  return getSignedUrl(getClient(), command, { expiresIn });
 }
