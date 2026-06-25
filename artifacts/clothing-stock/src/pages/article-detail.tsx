@@ -265,7 +265,7 @@ export default function ArticleDetail() {
             <div className="aspect-square bg-muted">
               {article.imageUrl ? (
                 <img
-                  src={`/api/storage${article.imageUrl}`}
+                  src={article.imageUrl}
                   alt={article.name}
                   className="w-full h-full object-cover"
                 />

@@ -83,7 +83,7 @@ export default function EditArticle() {
       setCustomFabricName(a.customFabricName ?? "");
       setNotes(a.notes ?? "");
       setImageUrl(a.imageUrl ?? null);
-      if (a.imageUrl) setImagePreview(`/api/storage${a.imageUrl}`);
+      if (a.imageUrl) setImagePreview(a.imageUrl);
 
       const existingSizes = SIZES.map((size) => {
         const found = a.sizes?.find((s: any) => s.size === size);
@@ -129,7 +129,7 @@ export default function EditArticle() {
     setImagePreview(preview);
     const result = await uploadFile(file);
     if (result) { setImageUrl(result.objectPath); toast.success("Image uploaded"); }
-    else { setImagePreview(imageUrl ? `/api/storage${imageUrl}` : null); toast.error("Upload failed"); }
+    else { setImagePreview(imageUrl ?? null); toast.error("Upload failed"); }
   }
 
   function removeImage() {

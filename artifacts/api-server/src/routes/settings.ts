@@ -1,21 +1,22 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { appSettingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { settingsCollection, nextId, type AppSettings } from "@workspace/db";
 import { z } from "zod";
 
 const router = Router();
 
-async function getOrCreateSettings() {
-  const [settings] = await db.select().from(appSettingsTable).limit(1);
-  if (!settings) {
-    const [created] = await db
-      .insert(appSettingsTable)
-      .values({ currency: "PKR", lowStockThreshold: 3, brandName: "My Clothing Brand" })
-      .returning();
-    return created;
-  }
-  return settings;
+async function getOrCreateSettings(): Promise<AppSettings> {
+  const col = await settingsCollection();
+  const existing = await col.findOne({}, { projection: { _id: 0 } });
+  if (existing) return existing;
+  const created: AppSettings = {
+    id: await nextId("settings"),
+    currency: "PKR",
+    lowStockThreshold: 3,
+    brandName: "My Clothing Brand",
+    updatedAt: new Date(),
+  };
+  await col.insertOne(created);
+  return created;
 }
 
 // GET /api/settings
@@ -53,18 +54,14 @@ router.patch("/", async (req, res) => {
     const body = bodySchema.parse(req.body);
     const existing = await getOrCreateSettings();
 
-    const updateData: Partial<typeof appSettingsTable.$inferInsert> = {
-      updatedAt: new Date(),
-    };
+    const updateData: Partial<AppSettings> = { updatedAt: new Date() };
     if (body.currency !== undefined) updateData.currency = body.currency;
     if (body.lowStockThreshold !== undefined) updateData.lowStockThreshold = body.lowStockThreshold;
     if (body.brandName !== undefined) updateData.brandName = body.brandName;
 
-    const [updated] = await db
-      .update(appSettingsTable)
-      .set(updateData)
-      .where(eq(appSettingsTable.id, existing.id))
-      .returning();
+    const col = await settingsCollection();
+    await col.updateOne({ id: existing.id }, { $set: updateData });
+    const updated = await getOrCreateSettings();
 
     res.json({
       currency: updated.currency,

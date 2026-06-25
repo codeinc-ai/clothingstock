@@ -35,7 +35,7 @@ export function ArticleCard({ article, currency, onDelete }: ArticleCardProps) {
         <div className="aspect-[4/3] bg-muted relative overflow-hidden">
           {article.imageUrl ? (
             <img
-              src={`/api/storage${article.imageUrl}`}
+              src={article.imageUrl}
               alt={article.name}
               className="object-cover w-full h-full"
             />

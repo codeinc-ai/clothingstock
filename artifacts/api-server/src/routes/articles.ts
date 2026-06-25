@@ -1,17 +1,21 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
 import {
-  articlesTable,
-  articleSizeStockTable,
-  stockAdjustmentsTable,
-  appSettingsTable,
+  articlesCollection,
+  sizesCollection,
+  adjustmentsCollection,
+  settingsCollection,
+  nextId,
+  type Article,
+  type ArticleSizeStock,
+  type AppSettings,
+  type Size,
 } from "@workspace/db";
-import { eq, desc, asc, sql, and, or, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 const router = Router();
 
-const SIZES = ["S", "M", "L", "XL", "XXL"] as const;
+const SIZES: Size[] = ["S", "M", "L", "XL", "XXL"];
+const SIZE_ORDER: Record<string, number> = { S: 1, M: 2, L: 3, XL: 4, XXL: 5 };
 
 function generateSKU(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -22,16 +26,19 @@ function generateSKU(): string {
   return sku;
 }
 
-async function getSettings() {
-  const [settings] = await db.select().from(appSettingsTable).limit(1);
-  if (!settings) {
-    const [created] = await db
-      .insert(appSettingsTable)
-      .values({ currency: "PKR", lowStockThreshold: 3, brandName: "My Clothing Brand" })
-      .returning();
-    return created;
-  }
-  return settings;
+async function getSettings(): Promise<AppSettings> {
+  const col = await settingsCollection();
+  const existing = await col.findOne({}, { projection: { _id: 0 } });
+  if (existing) return existing;
+  const created: AppSettings = {
+    id: await nextId("settings"),
+    currency: "PKR",
+    lowStockThreshold: 3,
+    brandName: "My Clothing Brand",
+    updatedAt: new Date(),
+  };
+  await col.insertOne(created);
+  return created;
 }
 
 function computeStockStatus(
@@ -48,14 +55,19 @@ function computeStockStatus(
   return "in_stock";
 }
 
-async function buildArticleResponse(article: typeof articlesTable.$inferSelect, lowStockThreshold: number) {
-  const sizes = await db
-    .select()
-    .from(articleSizeStockTable)
-    .where(eq(articleSizeStockTable.articleId, article.id))
-    .orderBy(
-      sql`CASE size WHEN 'S' THEN 1 WHEN 'M' THEN 2 WHEN 'L' THEN 3 WHEN 'XL' THEN 4 WHEN 'XXL' THEN 5 ELSE 6 END`,
-    );
+async function getSizesForArticle(articleId: number): Promise<ArticleSizeStock[]> {
+  const col = await sizesCollection();
+  const sizes = await col
+    .find({ articleId }, { projection: { _id: 0 } })
+    .toArray();
+  sizes.sort(
+    (a, b) => (SIZE_ORDER[a.size] ?? 6) - (SIZE_ORDER[b.size] ?? 6),
+  );
+  return sizes;
+}
+
+async function buildArticleResponse(article: Article, lowStockThreshold: number) {
+  const sizes = await getSizesForArticle(article.id);
   const totalQuantity = sizes
     .filter((s) => s.isAvailable)
     .reduce((acc, s) => acc + s.quantity, 0);
@@ -65,8 +77,8 @@ async function buildArticleResponse(article: typeof articlesTable.$inferSelect, 
     name: article.name,
     sku: article.sku,
     imageUrl: article.imageUrl,
-    costPrice: parseFloat(article.costPrice),
-    salePrice: parseFloat(article.salePrice),
+    costPrice: article.costPrice,
+    salePrice: article.salePrice,
     fabricType: article.fabricType,
     customFabricName: article.customFabricName,
     notes: article.notes,
@@ -88,40 +100,35 @@ router.get("/", async (req, res) => {
     const settings = await getSettings();
     const { search, fabric, size, status, sort } = req.query as Record<string, string>;
 
-    let articles = await db.select().from(articlesTable);
+    const col = await articlesCollection();
+    let articles = await col.find({}, { projection: { _id: 0 } }).toArray();
 
-    // Filter by search
     if (search) {
+      const q = search.toLowerCase();
       articles = articles.filter(
         (a) =>
-          a.name.toLowerCase().includes(search.toLowerCase()) ||
-          a.sku.toLowerCase().includes(search.toLowerCase()),
+          a.name.toLowerCase().includes(q) || a.sku.toLowerCase().includes(q),
       );
     }
-    // Filter by fabric
     if (fabric) {
       articles = articles.filter((a) => a.fabricType === fabric);
     }
 
-    // Build article responses to apply size/status filters
     const responses = await Promise.all(
       articles.map((a) => buildArticleResponse(a, settings.lowStockThreshold)),
     );
 
     let filtered = responses;
 
-    // Filter by size
     if (size) {
       filtered = filtered.filter((a) =>
         a.sizes.some((s) => s.size === size && s.isAvailable && s.quantity > 0),
       );
     }
-    // Filter by status
     if (status) {
       filtered = filtered.filter((a) => a.stockStatus === status);
     }
 
-    // Sort
     if (sort === "oldest") {
       filtered.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     } else if (sort === "alphabetical") {
@@ -139,7 +146,6 @@ router.get("/", async (req, res) => {
     } else if (sort === "sale_price_desc") {
       filtered.sort((a, b) => b.salePrice - a.salePrice);
     } else {
-      // Default: newest first
       filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
 
@@ -178,68 +184,62 @@ router.post("/", async (req, res) => {
     });
     const body = bodySchema.parse(req.body);
 
-    // Validate at least one size selected
     const hasSizeSelected = body.sizes.some((s) => s.isAvailable);
     if (!hasSizeSelected) {
       res.status(400).json({ error: "At least one size must be selected" });
       return;
     }
 
-    // Generate SKU if not provided
+    const col = await articlesCollection();
+
     let sku = body.sku?.trim() || "";
     if (!sku) {
       sku = generateSKU();
-      // ensure uniqueness
       let attempts = 0;
       while (attempts < 10) {
-        const existing = await db
-          .select()
-          .from(articlesTable)
-          .where(eq(articlesTable.sku, sku))
-          .limit(1);
-        if (existing.length === 0) break;
+        const existing = await col.findOne({ sku });
+        if (!existing) break;
         sku = generateSKU();
         attempts++;
       }
     } else {
-      // Check for duplicate SKU
-      const existing = await db
-        .select()
-        .from(articlesTable)
-        .where(eq(articlesTable.sku, sku))
-        .limit(1);
-      if (existing.length > 0) {
+      const existing = await col.findOne({ sku });
+      if (existing) {
         res.status(409).json({ error: `SKU "${sku}" already exists` });
         return;
       }
     }
 
-    const [article] = await db
-      .insert(articlesTable)
-      .values({
-        name: body.name,
-        sku,
-        imageUrl: body.imageUrl ?? null,
-        costPrice: String(body.costPrice),
-        salePrice: String(body.salePrice),
-        fabricType: body.fabricType,
-        customFabricName: body.customFabricName ?? null,
-        notes: body.notes ?? null,
-      })
-      .returning();
+    const now = new Date();
+    const article: Article = {
+      id: await nextId("articles"),
+      name: body.name,
+      sku,
+      imageUrl: body.imageUrl ?? null,
+      costPrice: body.costPrice,
+      salePrice: body.salePrice,
+      fabricType: body.fabricType,
+      customFabricName: body.customFabricName ?? null,
+      notes: body.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await col.insertOne(article);
 
-    // Insert sizes
-    await db.insert(articleSizeStockTable).values(
-      SIZES.map((size) => {
-        const sizeData = body.sizes.find((s) => s.size === size);
-        return {
-          articleId: article.id,
-          size,
-          isAvailable: sizeData?.isAvailable ?? false,
-          quantity: sizeData?.isAvailable ? (sizeData.quantity ?? 0) : 0,
-        };
-      }),
-    );
+    const sizesCol = await sizesCollection();
+    const sizeDocs: ArticleSizeStock[] = [];
+    for (const size of SIZES) {
+      const sizeData = body.sizes.find((s) => s.size === size);
+      sizeDocs.push({
+        id: await nextId("sizes"),
+        articleId: article.id,
+        size,
+        isAvailable: sizeData?.isAvailable ?? false,
+        quantity: sizeData?.isAvailable ? sizeData.quantity ?? 0 : 0,
+        updatedAt: now,
+      });
+    }
+    await sizesCol.insertMany(sizeDocs);
 
     const settings = await getSettings();
     const response = await buildArticleResponse(article, settings.lowStockThreshold);
@@ -262,7 +262,8 @@ router.get("/low-stock", async (req, res) => {
   }
   try {
     const settings = await getSettings();
-    const articles = await db.select().from(articlesTable);
+    const col = await articlesCollection();
+    const articles = await col.find({}, { projection: { _id: 0 } }).toArray();
     const responses = await Promise.all(
       articles.map((a) => buildArticleResponse(a, settings.lowStockThreshold)),
     );
@@ -289,18 +290,19 @@ router.get("/:id", async (req, res) => {
       res.status(400).json({ error: "Invalid article ID" });
       return;
     }
-    const [article] = await db.select().from(articlesTable).where(eq(articlesTable.id, id)).limit(1);
+    const col = await articlesCollection();
+    const article = await col.findOne({ id }, { projection: { _id: 0 } });
     if (!article) {
       res.status(404).json({ error: "Article not found" });
       return;
     }
     const settings = await getSettings();
     const baseResponse = await buildArticleResponse(article, settings.lowStockThreshold);
-    const adjustments = await db
-      .select()
-      .from(stockAdjustmentsTable)
-      .where(eq(stockAdjustmentsTable.articleId, id))
-      .orderBy(desc(stockAdjustmentsTable.createdAt));
+    const adjustmentsCol = await adjustmentsCollection();
+    const adjustments = await adjustmentsCol
+      .find({ articleId: id }, { projection: { _id: 0 } })
+      .sort({ createdAt: -1 })
+      .toArray();
     res.json({ ...baseResponse, adjustments });
   } catch (err) {
     req.log.error({ err }, "Failed to get article");
@@ -320,11 +322,8 @@ router.patch("/:id", async (req, res) => {
       res.status(400).json({ error: "Invalid article ID" });
       return;
     }
-    const [existing] = await db
-      .select()
-      .from(articlesTable)
-      .where(eq(articlesTable.id, id))
-      .limit(1);
+    const col = await articlesCollection();
+    const existing = await col.findOne({ id }, { projection: { _id: 0 } });
     if (!existing) {
       res.status(404).json({ error: "Article not found" });
       return;
@@ -351,58 +350,45 @@ router.patch("/:id", async (req, res) => {
     });
     const body = bodySchema.parse(req.body);
 
-    // Check for duplicate SKU if provided
     if (body.sku !== undefined && body.sku !== null) {
-      const dupSku = await db
-        .select()
-        .from(articlesTable)
-        .where(eq(articlesTable.sku, body.sku))
-        .limit(1);
-      if (dupSku.length > 0 && dupSku[0].id !== id) {
+      const dup = await col.findOne({ sku: body.sku });
+      if (dup && dup.id !== id) {
         res.status(409).json({ error: `SKU "${body.sku}" already exists` });
         return;
       }
     }
 
-    const updateData: Partial<typeof articlesTable.$inferInsert> = {
-      updatedAt: new Date(),
-    };
+    const updateData: Partial<Article> = { updatedAt: new Date() };
     if (body.name !== undefined) updateData.name = body.name;
     if (body.sku !== undefined) updateData.sku = body.sku ?? existing.sku;
-    if (body.imageUrl !== undefined) updateData.imageUrl = body.imageUrl;
-    if (body.costPrice !== undefined) updateData.costPrice = String(body.costPrice);
-    if (body.salePrice !== undefined) updateData.salePrice = String(body.salePrice);
+    if (body.imageUrl !== undefined) updateData.imageUrl = body.imageUrl ?? null;
+    if (body.costPrice !== undefined) updateData.costPrice = body.costPrice;
+    if (body.salePrice !== undefined) updateData.salePrice = body.salePrice;
     if (body.fabricType !== undefined) updateData.fabricType = body.fabricType;
-    if (body.customFabricName !== undefined) updateData.customFabricName = body.customFabricName;
-    if (body.notes !== undefined) updateData.notes = body.notes;
+    if (body.customFabricName !== undefined) updateData.customFabricName = body.customFabricName ?? null;
+    if (body.notes !== undefined) updateData.notes = body.notes ?? null;
 
-    const [updated] = await db
-      .update(articlesTable)
-      .set(updateData)
-      .where(eq(articlesTable.id, id))
-      .returning();
+    await col.updateOne({ id }, { $set: updateData });
 
-    // Update sizes if provided
     if (body.sizes) {
+      const sizesCol = await sizesCollection();
       for (const sizeInput of body.sizes) {
-        await db
-          .update(articleSizeStockTable)
-          .set({
-            isAvailable: sizeInput.isAvailable,
-            quantity: sizeInput.isAvailable ? sizeInput.quantity : 0,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(articleSizeStockTable.articleId, id),
-              eq(articleSizeStockTable.size, sizeInput.size),
-            ),
-          );
+        await sizesCol.updateOne(
+          { articleId: id, size: sizeInput.size },
+          {
+            $set: {
+              isAvailable: sizeInput.isAvailable,
+              quantity: sizeInput.isAvailable ? sizeInput.quantity : 0,
+              updatedAt: new Date(),
+            },
+          },
+        );
       }
     }
 
+    const updated = await col.findOne({ id }, { projection: { _id: 0 } });
     const settings = await getSettings();
-    const response = await buildArticleResponse(updated, settings.lowStockThreshold);
+    const response = await buildArticleResponse(updated!, settings.lowStockThreshold);
     res.json(response);
   } catch (err) {
     req.log.error({ err }, "Failed to update article");
@@ -426,16 +412,17 @@ router.delete("/:id", async (req, res) => {
       res.status(400).json({ error: "Invalid article ID" });
       return;
     }
-    const [existing] = await db
-      .select()
-      .from(articlesTable)
-      .where(eq(articlesTable.id, id))
-      .limit(1);
+    const col = await articlesCollection();
+    const existing = await col.findOne({ id });
     if (!existing) {
       res.status(404).json({ error: "Article not found" });
       return;
     }
-    await db.delete(articlesTable).where(eq(articlesTable.id, id));
+    await col.deleteOne({ id });
+    const sizesCol = await sizesCollection();
+    await sizesCol.deleteMany({ articleId: id });
+    const adjustmentsCol = await adjustmentsCollection();
+    await adjustmentsCol.deleteMany({ articleId: id });
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete article");
@@ -455,11 +442,8 @@ router.post("/:id/adjustments", async (req, res) => {
       res.status(400).json({ error: "Invalid article ID" });
       return;
     }
-    const [article] = await db
-      .select()
-      .from(articlesTable)
-      .where(eq(articlesTable.id, articleId))
-      .limit(1);
+    const col = await articlesCollection();
+    const article = await col.findOne({ id: articleId });
     if (!article) {
       res.status(404).json({ error: "Article not found" });
       return;
@@ -473,16 +457,8 @@ router.post("/:id/adjustments", async (req, res) => {
     });
     const body = bodySchema.parse(req.body);
 
-    const [sizeRow] = await db
-      .select()
-      .from(articleSizeStockTable)
-      .where(
-        and(
-          eq(articleSizeStockTable.articleId, articleId),
-          eq(articleSizeStockTable.size, body.size),
-        ),
-      )
-      .limit(1);
+    const sizesCol = await sizesCollection();
+    const sizeRow = await sizesCol.findOne({ articleId, size: body.size });
 
     const previousQuantity = sizeRow?.quantity ?? 0;
     let newQuantity: number;
@@ -499,47 +475,44 @@ router.post("/:id/adjustments", async (req, res) => {
       }
       quantityChanged = -body.quantity;
     } else {
-      // replace
       newQuantity = body.quantity;
       quantityChanged = body.quantity - previousQuantity;
     }
 
-    // Update size stock
+    const now = new Date();
     if (sizeRow) {
-      await db
-        .update(articleSizeStockTable)
-        .set({ quantity: newQuantity, updatedAt: new Date() })
-        .where(eq(articleSizeStockTable.id, sizeRow.id));
+      await sizesCol.updateOne(
+        { id: sizeRow.id },
+        { $set: { quantity: newQuantity, updatedAt: now } },
+      );
     } else {
-      await db.insert(articleSizeStockTable).values({
+      await sizesCol.insertOne({
+        id: await nextId("sizes"),
         articleId,
         size: body.size,
         isAvailable: true,
         quantity: newQuantity,
+        updatedAt: now,
       });
     }
 
-    // Update article updatedAt
-    await db
-      .update(articlesTable)
-      .set({ updatedAt: new Date() })
-      .where(eq(articlesTable.id, articleId));
+    await col.updateOne({ id: articleId }, { $set: { updatedAt: now } });
 
-    // Save adjustment record
     const userId = req.isAuthenticated() ? req.user.id : null;
-    const [adjustment] = await db
-      .insert(stockAdjustmentsTable)
-      .values({
-        articleId,
-        size: body.size,
-        adjustmentType: body.adjustmentType,
-        previousQuantity,
-        quantityChanged,
-        newQuantity,
-        reason: body.reason ?? null,
-        userId,
-      })
-      .returning();
+    const adjustment = {
+      id: await nextId("adjustments"),
+      articleId,
+      size: body.size,
+      adjustmentType: body.adjustmentType,
+      previousQuantity,
+      quantityChanged,
+      newQuantity,
+      reason: body.reason ?? null,
+      userId,
+      createdAt: now,
+    };
+    const adjustmentsCol = await adjustmentsCollection();
+    await adjustmentsCol.insertOne(adjustment);
 
     res.status(201).json(adjustment);
   } catch (err) {
@@ -564,11 +537,11 @@ router.get("/:id/adjustments/list", async (req, res) => {
       res.status(400).json({ error: "Invalid article ID" });
       return;
     }
-    const adjustments = await db
-      .select()
-      .from(stockAdjustmentsTable)
-      .where(eq(stockAdjustmentsTable.articleId, articleId))
-      .orderBy(desc(stockAdjustmentsTable.createdAt));
+    const adjustmentsCol = await adjustmentsCollection();
+    const adjustments = await adjustmentsCol
+      .find({ articleId }, { projection: { _id: 0 } })
+      .sort({ createdAt: -1 })
+      .toArray();
     res.json(adjustments);
   } catch (err) {
     req.log.error({ err }, "Failed to list adjustments");

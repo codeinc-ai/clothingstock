@@ -1,86 +1,73 @@
-import * as client from "openid-client";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { type Request, type Response } from "express";
-import { db, sessionsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
 import type { AuthUser } from "@workspace/api-zod";
 
-export const ISSUER_URL = process.env.ISSUER_URL ?? "https://replit.com/oidc";
 export const SESSION_COOKIE = "sid";
 export const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 
-export interface SessionData {
-  user: AuthUser;
-  access_token: string;
-  refresh_token?: string;
-  expires_at?: number;
-}
-
-let oidcConfig: client.Configuration | null = null;
-
-export async function getOidcConfig(): Promise<client.Configuration> {
-  if (!oidcConfig) {
-    oidcConfig = await client.discovery(
-      new URL(ISSUER_URL),
-      process.env.REPL_ID!,
-    );
+function getSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    throw new Error("SESSION_SECRET must be set for signing session tokens.");
   }
-  return oidcConfig;
+  return secret;
 }
 
-export async function createSession(data: SessionData): Promise<string> {
-  const sid = crypto.randomBytes(32).toString("hex");
-  await db.insert(sessionsTable).values({
-    sid,
-    sess: data as unknown as Record<string, unknown>,
-    expire: new Date(Date.now() + SESSION_TTL),
-  });
-  return sid;
+/** The single admin user this dashboard exposes. */
+export function getAdminUser(): AuthUser {
+  return {
+    id: "admin",
+    email: process.env.ADMIN_EMAIL || null,
+    firstName: "Admin",
+    lastName: null,
+    profileImageUrl: null,
+  };
 }
 
-export async function getSession(sid: string): Promise<SessionData | null> {
-  const [row] = await db
-    .select()
-    .from(sessionsTable)
-    .where(eq(sessionsTable.sid, sid));
+/** Constant-time comparison of the submitted password against ADMIN_PASSWORD. */
+export function verifyPassword(password: string): boolean {
+  const expected = process.env.ADMIN_PASSWORD;
+  if (!expected) {
+    throw new Error("ADMIN_PASSWORD must be set.");
+  }
+  const a = Buffer.from(String(password));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
-  if (!row || row.expire < new Date()) {
-    if (row) await deleteSession(sid);
+export function createToken(user: AuthUser): string {
+  return jwt.sign({ user }, getSecret(), { expiresIn: "7d" });
+}
+
+export function verifyToken(token: string): AuthUser | null {
+  try {
+    const decoded = jwt.verify(token, getSecret()) as { user?: AuthUser };
+    return decoded.user ?? null;
+  } catch {
     return null;
   }
-
-  return row.sess as unknown as SessionData;
 }
 
-export async function updateSession(
-  sid: string,
-  data: SessionData,
-): Promise<void> {
-  await db
-    .update(sessionsTable)
-    .set({
-      sess: data as unknown as Record<string, unknown>,
-      expire: new Date(Date.now() + SESSION_TTL),
-    })
-    .where(eq(sessionsTable.sid, sid));
-}
-
-export async function deleteSession(sid: string): Promise<void> {
-  await db.delete(sessionsTable).where(eq(sessionsTable.sid, sid));
-}
-
-export async function clearSession(
-  res: Response,
-  sid?: string,
-): Promise<void> {
-  if (sid) await deleteSession(sid);
-  res.clearCookie(SESSION_COOKIE, { path: "/" });
-}
-
-export function getSessionId(req: Request): string | undefined {
+export function getToken(req: Request): string | undefined {
   const authHeader = req.headers["authorization"];
   if (authHeader?.startsWith("Bearer ")) {
     return authHeader.slice(7);
   }
   return req.cookies?.[SESSION_COOKIE];
+}
+
+export function setSessionCookie(res: Response, token: string): void {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_TTL,
+  });
+}
+
+export function clearSessionCookie(res: Response): void {
+  res.clearCookie(SESSION_COOKIE, { path: "/" });
 }
